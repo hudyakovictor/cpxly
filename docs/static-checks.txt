@@ -1,0 +1,6 @@
+Python AST: 80 files parse; not Django execution.
+YAML: 8 files parse; not Docker Compose validation.
+Shell: sh -n passes for 13 files; scripts not run against Docker.
+Source assertions: localhost dev/test ports; public Caddy only; no elevated DB secrets in web/worker/beat; alternative CA Caddy-only mounts.
+ACTUAL standard-library bootstrap tests: formats, parent 0700/files 0444, no printed values, no overwrite, refuse silent permission change. NOT Docker secret readability proof.
+BLOCKED: Docker, uv.lock refresh, Django tests/lint/type checks, CI execution, TLS/S3/worker/persistence/backup/restore/save-load runtime tests.

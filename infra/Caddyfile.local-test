@@ -1,0 +1,9 @@
+# No public ACME request, no host trust-store modifications.
+{ admin off }
+capexly.test {
+    tls internal
+    reverse_proxy web:8000 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up Host {host}
+    }
+}

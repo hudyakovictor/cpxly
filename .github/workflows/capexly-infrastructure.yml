@@ -1,0 +1,61 @@
+name: Capexly infrastructure candidate
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  image-and-runtime-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      APP_IMAGE: capexly-app:ci
+      COMPOSE_PROJECT_NAME: capexly-ci
+      SECRETS_DIR: ./secrets/ci
+      S3_BUCKET: capexly-ci-synthetic
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Tooling without host Python or uv
+        run: docker build --target tooling -t capexly-tooling .
+      - name: Reject stale dependency lock
+        run: docker run --rm -v "$PWD:/app" capexly-tooling uv lock --check
+      - name: Synthetic CI secrets (never logged)
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/app" capexly-tooling python scripts/dev-secrets.py --environment ci
+          printf 'APP_IMAGE=capexly-app:ci\nCOMPOSE_PROJECT_NAME=capexly-ci\nSECRETS_DIR=./secrets/ci\nS3_BUCKET=capexly-ci-synthetic\n' > .env.ci
+      - name: Build release image for amd64
+        run: docker buildx build --platform linux/amd64 --target production --load -t "$APP_IMAGE" .
+      - name: User and platform assertions
+        run: |
+          test "$(docker image inspect -f '{{.Config.User}}' "$APP_IMAGE")" = '10001:10001'
+          test "$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$APP_IMAGE")" = linux/amd64
+      - name: Build isolated tests image with locked dev dependencies
+        run: docker build --target development -t capexly-tests:ci .
+      - name: Prepare isolated services
+        run: docker compose --env-file .env.ci -f compose.yaml up -d --wait db redis
+      - name: Migrate with dedicated role, then verify grants
+        run: |
+          docker compose --env-file .env.ci -f compose.yaml run --rm -e DJANGO_SETTINGS_MODULE=project.settings_ci migrate
+          docker compose --env-file .env.ci -f compose.yaml run --rm db-ops
+      - name: Tests under restricted runtime role
+        env:
+          APP_IMAGE: capexly-tests:ci
+        run: docker compose --env-file .env.ci -f compose.yaml run --rm -e DJANGO_SETTINGS_MODULE=project.settings_ci web python manage.py test --parallel 1
+      - name: Production Gunicorn startup (isolated CI settings)
+        run: |
+          docker compose --env-file .env.ci -f compose.yaml run -d --name capexly-ci-web -e DJANGO_SETTINGS_MODULE=project.settings_ci web
+          for n in $(seq 1 30); do
+            if docker exec capexly-ci-web python /app/scripts/healthcheck.py; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Inspect final filesystem (not full layer audit)
+        run: docker run --rm --entrypoint sh "$APP_IMAGE" -ec 'ls -la /app; test ! -d /app/.git; test ! -d /app/secrets; test ! -d /app/node_modules; test -z "$(find /app -name ".env" -o -name "*.dump")"'
+      - name: Stop isolated services, preserve volumes
+        if: always()
+        run: |
+          docker rm -f capexly-ci-web 2>/dev/null || true
+          docker compose --env-file .env.ci -f compose.yaml down || true
+# Full release still needs HTTPS/S3/email/worker/restore/clean-transfer evidence.

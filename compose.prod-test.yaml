@@ -1,0 +1,113 @@
+# Separate project/secrets/volumes REQUIRED; release app, no frontend-dev/runserver.
+x-test-env: &test-env
+  DJANGO_SETTINGS_MODULE: project.settings_prod_test
+  CAPEXLY_SYNTHETIC_TEST: '1'
+  DOMAIN: capexly.test
+  S3_REGION: garage
+  S3_ENDPOINT_URL: http://garage:3900
+  S3_BUCKET: capexly-prod-test-synthetic
+services:
+  web:
+    environment: *test-env
+    depends_on:
+      garage: {condition: service_healthy}
+  worker:
+    environment: *test-env
+    depends_on:
+      garage: {condition: service_healthy}
+  beat:
+    environment: *test-env
+    depends_on:
+      garage: {condition: service_healthy}
+  migrate:
+    environment: *test-env
+    depends_on:
+      garage: {condition: service_healthy}
+  caddy:
+    image: docker.io/library/caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    platform: linux/amd64
+    restart: unless-stopped
+    ports: ['127.0.0.1:8443:443']
+    networks:
+      proxy: {aliases: [capexly.test]}
+    volumes:
+      - ./infra/Caddyfile.local-test:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web: {condition: service_healthy}
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+  garage:
+    image: capexly-garage-dev:2.4.1
+    build:
+      context: .
+      dockerfile: infra/garage/Dockerfile
+    platform: linux/amd64
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      S3_BUCKET: ${S3_BUCKET:-capexly-synthetic}
+    secrets: [s3_access_key, s3_secret_key, garage_rpc_secret]
+    volumes:
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+      - ./infra/garage/garage.toml:/etc/garage.toml:ro
+    ports: ['127.0.0.1:3901:3900']
+    networks: [data]
+    healthcheck:
+      test: [CMD, /garage, status]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 64
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.27.8@sha256:6abc8e633df15eaf785cfcf38bae48e66f64beecdc03121e249d0f9ec15f0707
+    platform: linux/amd64
+    restart: unless-stopped
+    ports: ['127.0.0.1:8026:8025']
+    volumes: [mailpit_data:/data]
+    environment: {MP_DATABASE: /data/mailpit.db}
+    networks: [data]
+  synthetic:
+    image: ${APP_IMAGE:?Set release image}
+    platform: linux/amd64
+    profiles: [checks]
+    user: '10001:10001'
+    networks: [data]
+    environment:
+      <<: *test-env
+      DB_PASSWORD_FILE: /run/secrets/db_runtime_password
+      SECRET_KEY_FILE: /run/secrets/django_secret_key
+      S3_ACCESS_KEY_FILE: /run/secrets/s3_access_key
+      S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
+      SMOKE_PASSWORD_FILE: /run/secrets/smoke_user_password
+    secrets: [db_runtime_password, django_secret_key, s3_access_key, s3_secret_key, smoke_user_password]
+    command: [python, scripts/synthetic-fixture.py, prepare]
+  probe:
+    image: ${APP_IMAGE:?Set release image}
+    platform: linux/amd64
+    profiles: [checks]
+    user: '10001:10001'
+    networks: [proxy, data]
+    environment:
+      SMOKE_PASSWORD_FILE: /run/secrets/smoke_user_password
+      TEST_CA_FILE: /run/secrets/test_ca
+    secrets: [smoke_user_password, test_ca]
+    command: [python, scripts/http-smoke.py]
+volumes:
+  caddy_data:
+  caddy_config:
+  garage_meta:
+  garage_data:
+  mailpit_data:
+secrets:
+  garage_rpc_secret: {file: '${SECRETS_DIR}/garage_rpc_secret'}
+  smoke_user_password: {file: '${SECRETS_DIR}/smoke_user_password'}
+  test_ca: {file: '${SECRETS_DIR}/test_ca.crt'}

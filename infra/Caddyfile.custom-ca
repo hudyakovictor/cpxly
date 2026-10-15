@@ -1,0 +1,8 @@
+{ admin off }
+{$DOMAIN} {
+    tls /run/secrets/tls_certificate /run/secrets/tls_key
+    reverse_proxy web:8000 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up Host {host}
+    }
+}

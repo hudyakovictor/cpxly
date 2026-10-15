@@ -1,0 +1,13 @@
+{
+    email {$ACME_EMAIL}
+    acme_ca {$ACME_CA}
+    admin off
+}
+{$DOMAIN} {
+    encode zstd gzip
+    reverse_proxy web:8000 {
+        # Replace, do not trust headers supplied by the client.
+        header_up X-Forwarded-Proto {scheme}
+        header_up Host {host}
+    }
+}

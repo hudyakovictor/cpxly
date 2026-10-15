@@ -1,0 +1,20 @@
+{
+  "image": "dxflrs/garage:v2.4.1",
+  "platform": "linux/amd64",
+  "authentication": "anonymous registry pull token; no account",
+  "method": "HTTP download of all amd64 config/layer blobs; sha256 verified; bytes not retained",
+  "results": [
+    {
+      "digest": "sha256:c7746d213b6809acdd57ab4b7c48f9e2636e4382a3a63e3ee845a1e82df40209",
+      "bytes": 455,
+      "checksum": "verified"
+    },
+    {
+      "digest": "sha256:f323e827dc2183365230322ac829adfca3683fc20a61f00a483ebd019cdc07e7",
+      "bytes": 28101423,
+      "checksum": "verified"
+    }
+  ],
+  "docker_pull": "NOT RUN: Docker absent",
+  "runtime_smoke": "NOT RUN: Docker absent"
+}

@@ -1,0 +1,126 @@
+x-app: &app
+  image: ${APP_IMAGE:?Set release image}
+  platform: linux/amd64
+  init: true
+  restart: unless-stopped
+  user: "10001:10001"
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  networks: [data, egress]
+  depends_on:
+    db: {condition: service_healthy}
+    redis: {condition: service_healthy}
+  environment: &app-env
+    DJANGO_SETTINGS_MODULE: project.settings_production
+    DB_USER: capexly_runtime
+    DB_PASSWORD_FILE: /run/secrets/db_runtime_password
+    SECRET_KEY_FILE: /run/secrets/django_secret_key
+    S3_ACCESS_KEY_FILE: /run/secrets/s3_access_key
+    S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
+    S3_BUCKET: ${S3_BUCKET:?Set private S3 bucket}
+    S3_REGION: ${S3_REGION:-us-east-1}
+    S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+    DOMAIN: ${DOMAIN:-}
+    SMTP_HOST: ${SMTP_HOST:-}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+    DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-}
+  secrets: [db_runtime_password, django_secret_key, s3_access_key, s3_secret_key, smtp_password]
+  mem_limit: 768m
+  cpus: 1.0
+  pids_limit: 128
+services:
+  db:
+    image: docker.io/library/postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    platform: linux/amd64
+    restart: unless-stopped
+    networks: [data]
+    environment:
+      POSTGRES_DB: capexly
+      POSTGRES_USER: capexly_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_bootstrap_password
+    secrets: [db_bootstrap_password, db_migrator_password, db_runtime_password]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U capexly_bootstrap -d capexly"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 128
+  redis:
+    image: docker.io/library/redis:7.4.5-bookworm@sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb
+    platform: linux/amd64
+    restart: unless-stopped
+    networks: [data]
+    command: [redis-server, --appendonly, 'yes', --maxmemory, 256mb, --maxmemory-policy, noeviction]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 64
+  web:
+    <<: *app
+    networks: [data, egress, proxy]
+    healthcheck:
+      test: [CMD, python, /app/scripts/healthcheck.py]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+  worker:
+    <<: *app
+    command: [celery, -A, project, worker, --loglevel=INFO, --concurrency=2]
+  beat:
+    <<: *app
+    command: [celery, -A, project, beat, --loglevel=INFO, --pidfile=/tmp/celerybeat.pid]
+  migrate:
+    <<: *app
+    profiles: [ops]
+    restart: 'no'
+    environment:
+      <<: *app-env
+      DB_USER: capexly_migrator
+      DB_PASSWORD_FILE: /run/secrets/db_migrator_password
+    secrets: [db_migrator_password, django_secret_key, s3_access_key, s3_secret_key, smtp_password]
+    command: [python, manage.py, migrate, --noinput]
+  db-ops:
+    image: docker.io/library/postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    platform: linux/amd64
+    profiles: [ops]
+    networks: [data]
+    environment:
+      PGHOST: db
+      PGUSER: capexly_migrator
+      PGDATABASE: capexly
+    secrets: [db_migrator_password]
+    volumes:
+      - ./infra/postgres/check-runtime.sql:/checks/check-runtime.sql:ro
+      - ./infra/postgres/check-empty.sql:/checks/check-empty.sql:ro
+    entrypoint: [/bin/sh, -ec]
+    command: ['export PGPASSWORD="$$(cat /run/secrets/db_migrator_password)"; exec psql -v ON_ERROR_STOP=1 -f /checks/check-runtime.sql']
+networks:
+  data: {internal: true}
+  proxy: {internal: true}
+  egress: {}
+volumes:
+  postgres_data:
+  redis_data:
+secrets:
+  db_bootstrap_password: {file: '${SECRETS_DIR:?Set secrets dir}/db_bootstrap_password'}
+  db_migrator_password: {file: '${SECRETS_DIR}/db_migrator_password'}
+  db_runtime_password: {file: '${SECRETS_DIR}/db_runtime_password'}
+  django_secret_key: {file: '${SECRETS_DIR}/django_secret_key'}
+  s3_access_key: {file: '${SECRETS_DIR}/s3_access_key'}
+  s3_secret_key: {file: '${SECRETS_DIR}/s3_secret_key'}
+  smtp_password: {file: '${SECRETS_DIR}/smtp_password'}

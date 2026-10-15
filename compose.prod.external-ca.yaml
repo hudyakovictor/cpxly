@@ -1,0 +1,26 @@
+# Alternative to compose.prod.yaml, NOT layered over it.
+services:
+  caddy:
+    image: docker.io/library/caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    platform: linux/amd64
+    restart: unless-stopped
+    ports: ['80:80', '443:443']
+    networks: [proxy, egress]
+    environment:
+      DOMAIN: ${DOMAIN:?Set domain}
+    secrets: [tls_certificate, tls_key]
+    volumes:
+      - ./infra/Caddyfile.custom-ca:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web: {condition: service_healthy}
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+volumes:
+  caddy_data:
+  caddy_config:
+secrets:
+  tls_certificate: {file: '${SECRETS_DIR}/tls_certificate.pem'}
+  tls_key: {file: '${SECRETS_DIR}/tls_key.pem'}

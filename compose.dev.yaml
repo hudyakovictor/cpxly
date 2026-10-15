@@ -55,6 +55,7 @@ services:
     tmpfs: [/tmp]
     environment:
       S3_BUCKET: ${S3_BUCKET:-capexly-synthetic}
+      GARAGE_ALLOW_WORLD_READABLE_SECRETS: "true"
     secrets: [s3_access_key, s3_secret_key, garage_rpc_secret]
     volumes:
       - garage_meta:/var/lib/garage/meta

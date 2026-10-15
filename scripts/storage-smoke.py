@@ -5,8 +5,15 @@ backup/restore checks; no destructive cleanup is performed.
 import hashlib
 import http.client
 import os
+import sys
 import uuid
+from pathlib import Path
 from urllib.parse import urlsplit
+
+# Direct execution sets sys.path[0] to /app/scripts, not /app.
+# Resolve the trusted project root from this file, independently of cwd/PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import django
 
 django.setup()

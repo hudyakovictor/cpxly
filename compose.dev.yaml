@@ -8,7 +8,10 @@ services:
     depends_on:
       garage: {condition: service_healthy}
     build: {context: ., target: development}
-    environment: *dev-env
+    environment:
+      <<: *dev-env
+      DJANGO_VITE_PORT: "5180"
+      DJANGO_VITE_HOST: "127.0.0.1"
     read_only: false
     volumes: [./:/app, dev_venv:/app/.venv]
     command: [python, manage.py, runserver, '0.0.0.0:8000']
@@ -40,7 +43,7 @@ services:
     working_dir: /app
     volumes: [./:/app, dev_node_modules:/app/node_modules]
     command: [sh, -ec, 'npm ci && npm run dev -- --host 0.0.0.0']
-    ports: ['127.0.0.1:5173:5173']
+    ports: ['127.0.0.1:5180:5173']
     networks: [egress]
   garage:
     image: capexly-garage-dev:2.4.1
@@ -55,6 +58,10 @@ services:
     tmpfs: [/tmp]
     environment:
       S3_BUCKET: ${S3_BUCKET:-capexly-synthetic}
+      # DEV ONLY: Compose file-backed secrets are mounted 0444. This exception
+      # requires synthetic credentials, a host secrets directory with mode 0700,
+      # explicitly scoped read-only mounts, and trusted local Docker access.
+      # It relaxes Garage's mode check, NOT file permissions; never enable in prod.
       GARAGE_ALLOW_WORLD_READABLE_SECRETS: "true"
     secrets: [s3_access_key, s3_secret_key, garage_rpc_secret]
     volumes:

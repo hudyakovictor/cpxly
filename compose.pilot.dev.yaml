@@ -1,0 +1,12 @@
+# New optional overlay; review before applying. Only for isolated synthetic dev.
+# External AI stays OFF; no provider secret is mounted.
+x-pilot: &pilot
+  CAPEXLY_PILOT_ENABLED: "true"
+  CAPEXLY_EXTERNAL_AI_ENABLED: "false"
+services:
+  web:
+    environment: *pilot
+  worker:
+    environment: *pilot
+  migrate:
+    environment: *pilot

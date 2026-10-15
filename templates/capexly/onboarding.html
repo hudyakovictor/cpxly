@@ -1,0 +1,1 @@
+{% extends "capexly/base.html" %}{% block body %}<section class="glass cap-auth"><h1>Создадим кабинет компании</h1><div class="notice">Только вымышленные сведения. Не вводите данные клиентов. Внешний ИИ по умолчанию отключён.</div><form method="post">{% csrf_token %}{{ form.as_p }}<button>Создать кабинет →</button></form></section>{% endblock %}

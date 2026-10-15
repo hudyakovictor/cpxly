@@ -68,6 +68,8 @@ THIRD_PARTY_APPS = [
 PROJECT_APPS = [
     "apps.users.apps.UserConfig",
     "apps.web",
+    "apps.service_catalog.apps.ServiceCatalogConfig",
+    "apps.selfservice.apps.SelfServiceConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
@@ -152,7 +154,7 @@ else:
 # future changes much easier.
 AUTH_USER_MODEL = "users.CustomUser"
 LOGIN_URL = "account_login"
-LOGIN_REDIRECT_URL = "/"
+LOGIN_REDIRECT_URL = "/cabinet/"
 
 # Password validation
 # https://docs.djangoproject.com/en/stable/ref/settings/#auth-password-validators
@@ -401,4 +403,33 @@ LOGGING = {
             "level": env("PROJECT_LOG_LEVEL", default="INFO"),
         },
     },
+}
+
+# Self-service synthetic pilot: reviewed activation required, external AI OFF.
+CAPEXLY_PILOT_ENABLED = env.bool("CAPEXLY_PILOT_ENABLED", default=False)
+CAPEXLY_SANDBOX_MODE = True  # Real-data processing remains blocked at this stage.
+CAPEXLY_EXTERNAL_AI_ENABLED = env.bool("CAPEXLY_EXTERNAL_AI_ENABLED", default=False)
+CAPEXLY_AI_PROVIDER = env("CAPEXLY_AI_PROVIDER", default="stub")
+CAPEXLY_AI_MODEL = env("CAPEXLY_AI_MODEL", default="")
+CAPEXLY_AI_KEY_FILE = env("CAPEXLY_AI_KEY_FILE", default="")
+
+# Added by Capexly: no second beat process. Explicit bootstrap registers these
+# with the starter's existing DatabaseScheduler; no automatic startup mutation.
+SCHEDULED_TASKS.update({
+    "capexly-dispatch-outbox": {
+        "task": "apps.selfservice.tasks.dispatch_pending",
+        "schedule": timedelta(seconds=30),
+        "expire_seconds": 30,
+    },
+    "capexly-mark-stale-processing": {
+        "task": "apps.selfservice.tasks.mark_stale_processing",
+        "schedule": timedelta(seconds=60),
+        "expire_seconds": 60,
+    },
+})
+# Bound broker I/O during the best-effort post-commit wake-up.
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    **globals().get("CELERY_BROKER_TRANSPORT_OPTIONS", {}),
+    "socket_connect_timeout": 3,
+    "socket_timeout": 3,
 }
